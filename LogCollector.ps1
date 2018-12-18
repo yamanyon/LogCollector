@@ -44,7 +44,9 @@
     .NOTES
         Windows 10 にて動作確認を実施しています。
         Windows 10 および Windows Server 2016 以降に搭載された PowerShell をサポートします。
-        不具合のご連絡や有償サポートのご依頼は m.yamagishi@robinsons.co.jp もしくは twitter: yamanyon までどうぞ。
+        不具合のご連絡は以下の Github リポジトリまでどうぞ。
+        https://github.com/yamanyon/LogCollector
+        有償サポートのご依頼は m.yamagishi@robinsons.co.jp もしくは twitter: yamanyon までどうぞ。
 #>
 
 ####################################################################################################
@@ -252,6 +254,22 @@ function funcDateCheck {
 }
 
 ####################################################################################################
+# 収集開始引数と収集終了日時引数の比較
+# 戻り値: $strDestinationNowFolder ログの保存先フォルダ文字列
+####################################################################################################
+function CreateDestFolder {
+    WriteLog "Info" "$Destination が正常に利用できるか確認します。"
+    getFolderObject $Destination | Out-Null
+
+    WriteLog "Info" "$Destination フォルダーにログを保存するためのフォルダーを作成します。"
+    $objDestinationNowFolder = CreateDestinationNowFolder $Destination
+    $strDestinationNowFolder = $objDestinationNowFolder.FullName
+    WriteLog "Info" "作成したフォルダー: $strDestinationNowFolder"
+
+    $strDestinationNowFolder
+}
+
+####################################################################################################
 # イベントログ系の処理
 # 戻り値: なし
 ####################################################################################################
@@ -330,20 +348,25 @@ function DeleteFolder {
 }
 
 ####################################################################################################
+# 圧縮ファイルの保存期間が切れたら削除する
+# 戻り値: なし
+####################################################################################################
+function DeleteCompressFile {
+     # 圧縮ファイルの保存期間が切れたら削除する
+
+}
+
+####################################################################################################
 # 主処理
 ####################################################################################################
+
+WriteLog "Info" "処理を開始します。"
 
 # ふたつの日付引数のチェック
 funcDateCheck
 
 # 指定された -Destination パラメータからフォルダオブジェクトを取得
-WriteLog "Info" "$Destination が正常に利用できるか確認します。"
-getFolderObject $Destination | Out-Null
-
-WriteLog "Info" "$Destination フォルダーにログを保存するためのフォルダーを作成します。"
-$objDestinationNowFolder = CreateDestinationNowFolder $Destination
-$strDestinationNowFolder = $objDestinationNowFolder.FullName
-WriteLog "Info" "作成したフォルダー: $strDestinationNowFolder"
+$strDestinationNowFolder = CreateDestFolder
 
 # イベント ログの出力処理
 funcEventLog $strDestinationNowFolder
@@ -357,6 +380,7 @@ funcCompress $strDestinationNowFolder $Destination
 DeleteFolder $strDestinationNowFolder
 
 # この辺りに保存期間を超過した圧縮ファイルの削除機能も追加したい
+DeleteCompressFile $strDestinationNowFolder
 
-WriteLog "Info" "すべての操作が完了しました。"
+WriteLog "Info" "すべての処理が完了しました。"
 exit 0
