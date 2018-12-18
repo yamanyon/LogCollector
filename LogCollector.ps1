@@ -20,7 +20,7 @@
         このパラメーターで指定した日時より古いログが収集されます。
         省略した場合は StartDate 引数の 1 日後が指定されます。
 
-    .PARAMETER Destination
+    .PARAMETER DestPath
         収集したログの圧縮ファイルを保存するフォルダーをフルパスで指定します。
         このパラメーターは省略できません。
 
@@ -37,7 +37,7 @@
         正常終了もしくは警告終了した場合は 0 を、異常終了した場合は 1 を返します。
      
     .EXAMPLE
-        .\LogCollector.ps1 -Events System,Application -Destination C:\Temp\Log
+        .\LogCollector.ps1 -Events System,Application -DestPath C:\Temp\Log
         C:\Temp\Log に System、Application イベント ログをエクスポートします。
         -StartDate および -EndDate が指定されていないため、前日 1 日分が収集対象となります。
 
@@ -68,7 +68,7 @@ param (
 
     # ログの保存先を指定する
     [parameter(mandatory=$true)]    # null を許容しない
-    [String]$Destination,
+    [String]$DestPath,
 
     # 保存先ログの保存期間を日数で指定する
     [parameter(mandatory=$false)]   # null を許容する、null の場合は無限に保存する
@@ -258,11 +258,11 @@ function funcDateCheck {
 # 戻り値: $strDestinationNowFolder ログの保存先フォルダ文字列
 ####################################################################################################
 function CreateDestFolder {
-    WriteLog "Info" "$Destination が正常に利用できるか確認します。"
-    getFolderObject $Destination | Out-Null
+    WriteLog "Info" "$DestPath が正常に利用できるか確認します。"
+    getFolderObject $DestPath | Out-Null
 
-    WriteLog "Info" "$Destination フォルダーにログを保存するためのフォルダーを作成します。"
-    $objDestinationNowFolder = CreateDestinationNowFolder $Destination
+    WriteLog "Info" "$DestPath フォルダーにログを保存するためのフォルダーを作成します。"
+    $objDestinationNowFolder = CreateDestinationNowFolder $DestPath
     $strDestinationNowFolder = $objDestinationNowFolder.FullName
     WriteLog "Info" "作成したフォルダー: $strDestinationNowFolder"
 
@@ -365,7 +365,7 @@ WriteLog "Info" "処理を開始します。"
 # ふたつの日付引数のチェック
 funcDateCheck
 
-# 指定された -Destination パラメータからフォルダオブジェクトを取得
+# 指定された -DestPath パラメータからフォルダオブジェクトを取得
 $strDestinationNowFolder = CreateDestFolder
 
 # イベント ログの出力処理
@@ -374,7 +374,7 @@ funcEventLog $strDestinationNowFolder
 # この辺りにログ ファイル (所謂テキスト形式ログ) の収集機能も追加したい
 
 # ZIP 圧縮処理
-funcCompress $strDestinationNowFolder $Destination
+funcCompress $strDestinationNowFolder $DestPath
 
 # 圧縮後のログ削除処理
 DeleteFolder $strDestinationNowFolder
