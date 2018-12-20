@@ -1,6 +1,6 @@
 ﻿<#
     .SYNOPSIS
-        イベント ログ保存スクリプト "LogCollector.ps1" ver.0.2.20181218 山岸真人@株式会社ロビンソン
+        イベント ログ保存スクリプト "LogCollector.ps1" ver.0.2.20181220 山岸真人@株式会社ロビンソン
      
     .DESCRIPTION
         Windows が出力したイベント ログを指定した期間、指定したフォルダーに保存します。
@@ -9,6 +9,13 @@
         収集するイベント ログの種類を指定します。
         Application、Security、System のいずれかもしくは複数を指定できます。
         省略した場合はイベント ログを収集しません。
+
+    .PARAMETER SourceFolderPath
+        収集するファイルをフルパスで指定します。
+        複数指定する場合はカンマで区切ります。
+        スペースを含む場合は "Full Path" もしくは 'Full Path' のように指定します。
+        省略した場合はファイルを収集しません。
+        この機能は現在開発中です。
     
     .PARAMETER StartDate
         収集対象ログの範囲を DateTime 型で指定します。
@@ -20,15 +27,15 @@
         このパラメーターで指定した日時より古いログが収集されます。
         省略した場合は StartDate 引数の 1 日後が指定されます。
 
-    .PARAMETER DestPath
+    .PARAMETER ZipPath
         収集したログの圧縮ファイルを保存するフォルダーをフルパスで指定します。
         このパラメーターは省略できません。
 
-    .PARAMETER DestLifeTime
+    .PARAMETER ZipLifeTime
         作成した圧縮ファイルの保存期間を日数で指定します。
         保存期間を超過した圧縮ファイルは削除されます。
-        省略した場合は圧縮ファイルを削除しません。
-        現在この機能は開発中です。
+        保存期間の時分秒は切り捨てられます。
+        省略した場合、ゼロもしくはマイナスの値が指定された場合は圧縮ファイルを削除しません。
 
     .INPUTS
         なし。パイプラインからの入力には対応していません。
@@ -37,7 +44,7 @@
         正常終了もしくは警告終了した場合は 0 を、異常終了した場合は 1 を返します。
      
     .EXAMPLE
-        .\LogCollector.ps1 -Events System,Application -DestPath C:\Temp\Log
+        .\LogCollector.ps1 -Events System,Application -ZipPath C:\Temp\Log
         C:\Temp\Log に System、Application イベント ログをエクスポートします。
         -StartDate および -EndDate が指定されていないため、前日 1 日分が収集対象となります。
 
@@ -57,6 +64,10 @@ param (
     [parameter(mandatory=$false)]   # null を許容する、null の場合は取得しない
     [ValidateSet("Application","Security","System")]
     [array]$Events,
+    
+    # どのファイルを取得するかを指定する
+    [parameter(mandatory=$false)]   # null を許容する、null の場合は取得しない
+    [array]$SourceFolderPath,
 
     # いつからのログを取得するかを指定する
     [parameter(mandatory=$false)]   # null を許容する、null の場合は前日の 0:00:00 を設定
@@ -68,11 +79,11 @@ param (
 
     # ログの保存先を指定する
     [parameter(mandatory=$true)]    # null を許容しない
-    [String]$DestPath,
+    [String]$ZipPath,
 
     # 保存先ログの保存期間を日数で指定する
     [parameter(mandatory=$false)]   # null を許容する、null の場合は無限に保存する
-    [string]$DestLifeTime
+    [int]$ZipLifeTime
 )
 
 ####################################################################################################
@@ -250,7 +261,7 @@ function funcDateCheck {
         WriteLog "Error" "funcDateCheck error."
     }
 
-    WriteLog "Info" ( $StartDate.ToString("yyyy/MM/dd HH:mm:ss") + " ～ " + $EndDate.ToString("yyyy/MM/dd HH:mm:ss") + " までのログを出力します。" )
+    WriteLog "Info" ( $StartDate.ToString("yyyy/MM/dd HH:mm:ss") + " ～ " + $EndDate.ToString("yyyy/MM/dd HH:mm:ss") + " までのイベント ログやファイルを出力します。" )
 }
 
 ####################################################################################################
@@ -258,11 +269,14 @@ function funcDateCheck {
 # 戻り値: $strDestinationNowFolder ログの保存先フォルダ文字列
 ####################################################################################################
 function CreateDestFolder {
-    WriteLog "Info" "$DestPath が正常に利用できるか確認します。"
-    getFolderObject $DestPath | Out-Null
+    param (
+        [string]$strFolder  # 作成するフォルダの名前
+    )
+    WriteLog "Info" "$strFolder が正常に利用できるか確認します。"
+    getFolderObject $strFolder | Out-Null
 
-    WriteLog "Info" "$DestPath フォルダーにログを保存するためのフォルダーを作成します。"
-    $objDestinationNowFolder = CreateDestinationNowFolder $DestPath
+    WriteLog "Info" "$strFolder フォルダーにログを保存するためのフォルダーを作成します。"
+    $objDestinationNowFolder = CreateDestinationNowFolder $strFolder
     $strDestinationNowFolder = $objDestinationNowFolder.FullName
     WriteLog "Info" "作成したフォルダー: $strDestinationNowFolder"
 
@@ -275,18 +289,91 @@ function CreateDestFolder {
 ####################################################################################################
 function funcEventLog {
     param (
-        $strDestinationNowFolder    # ログを保存するフォルダー
+        $strDestinationNowFolder,   # ログを保存するフォルダー
+        $strEvents                  # イベント ログ
     )
 
-    # イベントログを保存するフォルダーを作成する
+    if ( $null -eq $strEvents ) {
+        WriteLog "Info" "-Events 引数が指定されていないので、イベント ログの収集処理は実行しません。"
+        return
+    }
+
+    # イベント ログを保存するフォルダーを作成する
     WriteLog "Info" "$strDestinationNowFolder フォルダーにイベント ログを保存するためのフォルダーを作成します。"
-    $objWriteFolder = CreateFolder ( $strDestinationNowFolder + "\EventLog" )
+    $objWriteFolder = CreateFolder "$strDestinationNowFolder\EventLog"
     $strWriteFolder = $objWriteFolder.FullName
     WriteLog "Info" "作成したフォルダー: $strWriteFolder"
 
-    WriteLog "Info" "イベントログのエクスポートを開始します。"
-    foreach ( $strEventLog in $Events ) {
+    WriteLog "Info" "イベントログの収集を開始します。"
+    foreach ( $strEventLog in $strEvents ) {
         GetEventObjects $strEventLog $strWriteFolder
+    }
+}
+
+####################################################################################################
+# ファイル収集処理
+# 戻り値: なし
+####################################################################################################
+function GetFileObjects {
+    param (
+        [string]$strDestination,    # 収集先フォルダのフルパス
+        [string]$strPath            # 収集対象フォルダのフルパス
+    )
+    try {
+        $objPath = Get-Item $strPath
+        $strPathName = $objPath.Name
+    }
+    catch {
+        WriteLog "Warn" "$strPath フォルダーへアクセスできません。$strPath フォルダーの処理をスキップします。"
+        return
+    }
+
+    WriteLog "Info" "$strPath フォルダーのファイルを収集します。"
+
+    try {
+        $ChildItems = Get-ChildItem $strPath `
+        |   Where-Object { $_.LastWriteTime -ge $StartDate } `
+        |   Where-Object { $_.LastWriteTime -lt $EndDate }
+    }
+    catch {
+        WriteLog "Warn" "$strPath フォルダーのファイルへアクセスできません。$strPath フォルダーの処理をスキップします。"
+        return
+    }
+
+    # ファイルを保存するフォルダーを作成する
+    WriteLog "Info" "$strDestination フォルダーにファイルを保存するためのフォルダーを作成します。"
+    $objWriteFolder = CreateFolder "$strDestination\$strPathName"
+    $strWriteFolder = $objWriteFolder.FullName
+    WriteLog "Info" "作成したフォルダー: $strWriteFolder"
+    
+    try {
+        $ChildItems | Copy-Item -Destination $strWriteFolder
+    }
+    catch {
+        WriteLog "Warn" "$strWriteFolder フォルダーにファイルをコピーできません。$strPath フォルダーの処理をスキップします。"
+        return
+    }
+}
+
+
+####################################################################################################
+# ファイル収集処理
+# 戻り値: なし
+####################################################################################################
+function funcSourceFolders {
+    param (
+        [string]$strDestination,        # 収集先フォルダのフルパス
+        [array]$strSourceFolderPaths    # 収集対象ファイルのフルパス
+    )
+
+    if ( $null -eq $strSourceFolderPaths ) {
+        WriteLog "Info" "-SourceFolderPath 引数が指定されていないので、ファイルの収集処理は実行しません。"
+        return
+    }
+
+    WriteLog "Info" "ファイルの収集を開始します。"
+    foreach ( $strSourceFolderPath in $strSourceFolderPaths ) { 
+        GetFileObjects $strDestination $strSourceFolderPath
     }
 }
 
@@ -303,7 +390,19 @@ function funcCompress {
     # $strSource がフォルダーかどうか確認しオブジェクトを生成
     $objSource = getFolderObject $strSource
 
-    # $objSource フォルダーに保存されているファイルオブジェクトを再帰的に取得
+    # $objSource フォルダーに保存されているオブジェクトにファイルがあることを確認
+    try {
+        if ( $null -eq ( Get-ChildItem $objSource -Recurse | Where-Object { !$_.PSIsContainer } ) ) {
+            throw "圧縮対象となるファイルがありません。"
+        }
+    }
+    catch {
+        # ファイルオブジェクトが無ければこの関数を強制終了する
+        WriteLog "Warn" "funcCompress $strSource is null. Escape compress function."
+        return
+    }
+
+    # $objSource フォルダーに保存されているオブジェクトを取得
     try {
         $objSourceChileItems = Get-ChildItem $objSource
     }
@@ -312,9 +411,7 @@ function funcCompress {
     }
 
     # 取得できた $objSourceChildItems を String 型配列に放り込む
-    $strSourceChildItems = foreach ( $objSourceChildItem in $objSourceChileItems ) {
-        $objSourceChildItem.FullName
-    }
+    $strSourceChildItems = $objSourceChileItems | ForEach-Object { $_.FullName }
 
     # 圧縮ファイルを保存するファイル名をフルパスで生成
     $strDestFileFullPath = $strDestination + "\" + $objSource.Name + ".zip"
@@ -348,12 +445,59 @@ function DeleteFolder {
 }
 
 ####################################################################################################
-# 圧縮ファイルの保存期間が切れたら削除する
+# 圧縮ファイルの保存期間を DateTime 型に変換する
+# 戻り値: $dtLifeTime 圧縮ファイルの保存期間
+####################################################################################################
+
+function ConvertDateToDateTime {
+    param (
+        [int]$iDate # 何日前なのかを示す数値
+    )
+
+    # -ZipLifeTime で指定された保管日数を評価する。
+    if ( $iDate -le 0 ) {
+        # 0 以下の場合、この関数を $null で抜ける。
+        return $null
+    }
+
+    # 保管日の閾値を算出する
+    ( Get-Date ).AddDays($iDate*-1).Date
+}
+
+####################################################################################################
+# 保存期間が経過したファイルを削除する
 # 戻り値: なし
 ####################################################################################################
-function DeleteCompressFile {
-     # 圧縮ファイルの保存期間が切れたら削除する
+function DeleteExpiredFile {
+    param (
+        [string]$strFolder, # 削除対象フォルダー
+        [int]$iLifeTime     # 保管日数
+    )
 
+    WriteLog "Info" "$strFolder の保存期間が経過したファイルを削除します。"
+
+    $dtLifeTime = ConvertDateToDateTime $iLifeTime
+
+    if ( $null -eq $dtLifeTime ) {
+        WriteLog "Info" "-ZipLifeTime が未指定もしくは 0 以下のため、$strFolder のファイルは削除しません。"
+        return
+    }
+
+    WriteLog "Info" ( $dtLifeTime.ToString("yyyy/MM/dd HH:mm:ss") + " より古いファイルを削除します。" )
+
+    try {
+        $objItems = Get-ChildItem $strFolder | Where-Object { $_.LastWriteTime -lt $dtLifeTime -and !$_.PSIsContainer }
+    }
+    catch {
+        WriteLog "Error" "DeleteExpiredFile cannot get period expired file."
+    }
+
+    try {
+        $objItems | ForEach-Object { Remove-Item $_.FullName -Force }
+    }
+    catch {
+        WriteLog "Error" "DeleteExpiredFile cannot remove period expired file."
+    }
 }
 
 ####################################################################################################
@@ -365,22 +509,23 @@ WriteLog "Info" "処理を開始します。"
 # ふたつの日付引数のチェック
 funcDateCheck
 
-# 指定された -DestPath パラメータからフォルダオブジェクトを取得
-$strDestinationNowFolder = CreateDestFolder
+# 指定された -ZipPath パラメータからフォルダオブジェクトを取得
+$strDestinationNowFolder = CreateDestFolder $ZipPath
 
 # イベント ログの出力処理
-funcEventLog $strDestinationNowFolder
+funcEventLog $strDestinationNowFolder $Events
 
-# この辺りにログ ファイル (所謂テキスト形式ログ) の収集機能も追加したい
+# ファイル (所謂テキスト形式ログ) の収集
+funcSourceFolders $strDestinationNowFolder $SourceFolderPath
 
 # ZIP 圧縮処理
-funcCompress $strDestinationNowFolder $DestPath
+funcCompress $strDestinationNowFolder $ZipPath
 
-# 圧縮後のログ削除処理
+# 圧縮後の収集ログ削除処理
 DeleteFolder $strDestinationNowFolder
 
-# この辺りに保存期間を超過した圧縮ファイルの削除機能も追加したい
-DeleteCompressFile $strDestinationNowFolder
+# 保存期間を超過した圧縮ファイルを割くぞする
+DeleteExpiredFile $ZipPath $ZipLifeTime
 
 WriteLog "Info" "すべての処理が完了しました。"
 exit 0
