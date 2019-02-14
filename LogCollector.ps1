@@ -1,6 +1,6 @@
 ﻿<#
     .SYNOPSIS
-        イベント ログ保存スクリプト "LogCollector.ps1" ver.0.22.20190212 山岸真人@株式会社ロビンソン
+        イベント ログ保存スクリプト "LogCollector.ps1" ver.0.23.20190214 山岸真人@株式会社ロビンソン
      
     .DESCRIPTION
         Windows が出力したイベント ログや、様々なファイルを、指定した期間、指定したフォルダーに保存します。
@@ -88,7 +88,8 @@
 v0.20 2018/12/20 初期リリース
 v0.21 2019/02/08 ログ収集部分を改良, 主処理系を関数化, コメント改修
 v0.22 2019/02/12 -SourceLifeTime パラメーターを実装, エラーメッセージを最適化, ヘルプを最適化
-v0.23 xxxx/xx/xx イベント ログの保存フォーマットを CSV 形式と EVTX 形式の両方に対応する
+v0.23 2019/02/14 イベント ログの CSV 出力時に欠落していた情報が正しく出力できるよう修正
+v0.24 xxxx/xx/xx イベント ログの保存フォーマットを CSV 形式と EVTX 形式の両方に対応する
 v1.00 xxxx/xx/xx 単体テスト項目作成, 単体テスト実施
 ###################################################################################################>
 
@@ -320,7 +321,7 @@ function GetEventObjects {
         |   Where-Object { $_.TimeGenerated -lt $EndDate }
     }
     catch {
-        WriteLog "Warn" "イベント ログ $strEventLog を参照しようとして失敗しました。イベント ログの保存処理をスキップします。"
+        WriteLog "Warn" "イベント ログ $strEventLog を参照しようとして失敗しました。イベント ログの保存処理をスキップします。Security ログの収集には管理者権限が必要です。"
         return
     }
 
@@ -334,12 +335,16 @@ function GetEventObjects {
     $strPath += $EndDate.ToString($strFormat) + ".csv"
 
     # ファイル名を指定して CSV で出力する
-    WriteLog "Info" "フォルダー $strPath にイベント ログ $strEventLog をエクスポートします。"
+    WriteLog "Info" "ファイル $strPath にイベント ログ $strEventLog をエクスポートします。"
     try {
-        $objEvents | Export-Csv -Path $strPath -Encoding Default -NoTypeInformation
-    }
+        $objEvents `
+        |   Select-Object Index, TimeGenerated, TimeWritten, Source, EventID, CategoryNumber, Category, EntryType, `
+                InstanceId, MachineName, UserName, Message, @{Name='ReplacementStrings';Expression={[String]::Join(";", $_.ReplacementStrings)}}, `
+                @{Name='Data';Expression={[String]::Join(";", ( $_.Data | ForEach-Object { "{0:X2}" -f $_ } ) )}}, Site, Container `
+        |   Export-Csv -Path $strPath -Encoding Default -NoTypeInformation
+        }
     catch {
-        WriteLog "Error" "フォルダー $strPath にイベント ログ $strEvdentLog をエクスポートしようとして失敗しました。"
+        WriteLog "Error" "ファイル $strPath にイベント ログ $strEvdentLog をエクスポートしようとして失敗しました。"
     }
 }
 
